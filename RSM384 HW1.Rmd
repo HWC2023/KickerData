@@ -1,8 +1,5 @@
 ---
 title: "NFL Field Goal Analysis: Are Kickers Actually Good At Kicking?"
-author: "Hung Wen (Trevor) Chang"
-student number: "1007063455"
-date: "February 6th, 2023"
 output:
   pdf_document: default
   html_document: default
