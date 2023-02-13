@@ -1,0 +1,136 @@
+---
+title: "NFL Field Goal Analysis: Are Kickers Actually Good At Kicking?"
+author: "Hung Wen (Trevor) Chang"
+student number: "1007063455"
+date: "February 6th, 2023"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Expected Field Goals Model
+First, we will load up the packages needed for the analysis:
+```{r launch, results="hide", message=FALSE}
+library(tidyverse)
+library(RCurl)
+```
+Following that, we can load up our dataset from the internet: (dataset from Class3 Lab)
+```{r}
+url <- getURL("https://raw.githubusercontent.com/statsbylopez/StatsSports/master/Data/nfl_fg.csv")
+nfl.kick <- read.csv(text = url)
+```
+
+  Of the variables recorded for each kick, the three factors most likely to affect field goal makes are the weather, distance, and type of turf present on the field (a grass field or an artificial turf field.) We can run a linear regression of makes on these factors, as well as the minutes of the game the kick took place at and the score difference at the time, to look at how each factor affects field goal makes.
+
+```{r}
+Xfg <- glm(Success ~ Distance + Grass + Temp + GameMinute + ScoreDiff, data = nfl.kick,
+           family = "binomial")
+summary(Xfg)
+```
+
+  Based on the output, we can see that the weather has a very minimal impact on the likelihood of a make, with a one degree fahrenheit increase in temperature only increasing the likelihood of a make by approximately 0.079%. On the other hand, the type of field the game is played on has the greatest impact of the three factors, with a grass field decreasing the chances of a make by 0.19% approximately on average. Finally, each additional yard of distance added to a field goal decreased the odds of it being made by approximately 0.11% on average. Looking at the three factors, it can be seen that the distance of the field goal and the weather during the game are extremely statistically significant factors (at a .1% significance level) with regard to the likelihood of making a field goal, whereas the turf type's impact was only significant at the 1% significance level. Meanwhile, the minute the kick took place and the score difference are seen to be statistically insignificant in this model, as represented by the lack of stars next to it's impact, indicating that their influences are likely not critical in the grand scheme of kicking. 
+  
+  That being said, there are some other factors involved in kicking that are not presented in the data which can impact kicking success, such as whether the stadium has a roof or not (a domed stadium is less likely to have it's kicks impacted by windy or rainy weather), as well as the altitude of the stadium where the kick occurs (notably, a lot of the longest free kicks in NFL history occur at Mile High Stadium in Denver, a stadium at a much higher altitude than other NFL stadiums.)
+
+  Notably, many data points are missing values for the temperature at the time of the kick, which would make it's inclusion as a factor in the model problematic logistically, so for the next steps, we will use a model excluding the effects of weather.
+
+
+# Kicker Value Added
+  To start, we can adjust our Xfg dataset to account for the missing temperature data by filling in the missing variables and then creating a boolean variable for subzero weather (farenheit):
+```{r}
+nfl.kick <- nfl.kick %>% replace_na(list(Temp = 1))
+nfl.kick <- nfl.kick %>%
+  mutate(Subzero = Temp <= 0)
+Xfg <- glm(Success ~ Distance + Grass + GameMinute + ScoreDiff + Subzero, data = nfl.kick,
+           family = "binomial")
+```
+Subsequently, we can add a variable into kicks dataset that accounts for the kick's outcome relative to expected:
+```{r Value, message=FALSE, warning=FALSE}
+nfl.kick <- nfl.kick %>%
+  mutate(ExpectedFG = fitted(Xfg))
+nfl.kick <- nfl.kick %>%
+  mutate(Performance = Success - ExpectedFG)
+
+ggplot(nfl.kick,aes(Distance, ExpectedFG, color=Success)) + geom_point() + geom_smooth()
+```
+
+# Finding the best kickers
+Now, we can use the expected performance of kickers to find the best kicker across the data sets:
+```{r}
+Kickersum <- nfl.kick %>%
+  group_by(Kicker) %>%
+  summarize(Conversion = sum(ExpectedFG), AttemptedKicks = n(), ConRate = Conversion/AttemptedKicks)
+head(Kickersum)
+```
+We can then use this data to find the average conversion amount and the average conversion rate
+```{r}
+Kickersum <- Kickersum %>%
+  mutate(COAK = Conversion - mean(Conversion))
+Kickersum <- Kickersum %>%
+  mutate(ConRateOAK = ConRate - mean(ConRate))
+head(Kickersum)
+```
+(As an aside, OAK denotes over average kicker, as we are looking at each kicker's performance over the aggregated data from all kickers in the dataset)
+
+```{r}
+ggplot(Kickersum,aes(ConRateOAK, COAK, color=Kicker)) + geom_point()
+```
+
+  From this data, we can see that most kickers who have had sufficient kicking volume (that is to say that they have attempted a significant number of kicks in their careers) tend to converge towards the average conversion rate of an NFL kicker, with the majority of outlier data coming from kickers with much less volume, such as the noticeable green dot to the far left, Elling, who attempted just a single kick in his career. We can therefore see that while kickers can go on hot or cold streaks, over a long enough period of time, their stats are likely to converge toward league average.
+
+  That being said, there is one issue with this data that, while it does not make the findings redundant, does bring into question if there is a better way to categorize kickers than by name. The best kicker in terms of kicks converted over league average is Brown. Within this data set, the next two kickers following him are Adam Vinatieri and Stephen Gostkowski, two players who are considered greats in the position, which made me look up Brown to see his career stats. This led me to the finding that the dataset contains two kickers named brown, Kris Brown and Josh Brown, both of whom had long careers, but had their stats combined in this summarization. As both players played across multiple teams in their career and had years of overlap, the lack of a first name section of the database makes it very difficult to separate their combined data point for each individual player. However, as both players had long careers and the combined data point is very close to a 0% conversion over average kicker rate, separation of their data would be unlikely to significantly change the outputs of this data.
+
+```{r}
+head(Kickersum) %>% arrange(desc(COAK))
+head(Kickersum) %>% arrange(desc(ConRateOAK))
+```
+  From these two data points, we can see that the top 5 kickers by conversion volume over average kicker are Brown, Gostkowski, Vinatieri, Akers, and Dawson, with Gould joining the top 5 if you take out Brown as that is technically a combination of two separate kickers. From a conversion rate, the top 5 kickers are Pettrey, Stitser, Peterson, Mehlhaff, and Schmitt. However, the most kickers attempted by any of these players in the latter list is 25, which is a very small sample size. I will adjust and rerun the analysis for ConRateOAK, filtering out players who have attempted less than 100 kicks.
+```{r}
+Kickersum <- Kickersum %>%
+  mutate(Volume = AttemptedKicks > 100)
+KickerVolume <- Kickersum %>% filter(Volume == "TRUE")
+head(KickerVolume) %>% arrange(desc(ConRateOAK))
+```
+  From this, we can see that the 5 highest conversion rates over average for kickers with over 100 attempted kicks belong to Carney, Stover, Tynes, Graham, and Hartley, in that order.
+
+We can do something similar for long distance kicks (>45 yards)
+```{r}
+LongKicks <- nfl.kick %>%
+  mutate(Long = Distance >= 45)
+LongKicks <- LongKicks %>% filter(Long == "TRUE")
+DistanceKickers <- LongKicks %>%
+  group_by(Kicker) %>%
+  summarize(Conversion = sum(ExpectedFG), AttemptedKicks = n(), ConRate = Conversion/AttemptedKicks)
+```
+Now that we have created a new dataset looking at kicking data over long distances, we can create the expectation data again
+```{r}
+DistanceKickers <- DistanceKickers %>%
+  mutate(COAK = Conversion - mean(Conversion))
+DistanceKickers <- DistanceKickers %>%
+  mutate(ConRateOAK = ConRate - mean(ConRate))
+```
+Now, we can arrange the respective data:
+```{r}
+head(DistanceKickers) %>% arrange(desc(COAK))
+head(DistanceKickers) %>% arrange(desc(ConRateOAK))
+```
+  We can see from here that the top 5 overall are Brown, Janikowski, Vinatieri, Crosby, and Scobee, adding in Folk if you exclude the Brown data point from the rankings. On a per kick basis, the top 5 are Coutu, Cortez, Stitser, Vanderjagt, and Carney. As longer kicks tend to occur much less frequently, especially in the past when analytics were not a big part of NFL decision making, and punting occured more often, we will not filter by volume here.
+
+# Measuring Kicker Effectiveness
+
+  As we are looking at extra value by distance, we can create a new dataset consisting of just the kicks of the top 5 kickers. For this section, we will include the combined Brown data as a top 5, so we are taking the individual kick data of Brown, Gostkowski, Vinatieri, Akers, and Dawson.
+```{r}
+Top5 <- nfl.kick
+Top5 <- Top5 %>% filter(Kicker == "Brown" | Kicker == "Gostkowski" | Kicker == "Vinatieri"
+                        | Kicker == "Akers" | Kicker == "Dawson")
+```
+Now, we can create a graph to observe the value added by the kicker on each kick
+```{r Effective, results="hide", message=FALSE}
+ggplot(Top5,aes(Distance, Performance, color=Kicker)) + geom_point() + geom_smooth()
+```
+
+  From this data, we can see that for most close distances, the top kickers tend to hover close to adding no value to a kick, but as we get farther from the end zone, especially around the 40 to 60 yard range, these kickers tend to add decent value to their kicks. Notably, Vinatieri and Dawson seem to peak in extra value around the 55 yard mark before dropping off and actually losing value on average when the kick is beyond that distance, while the other three kickers (Akers, Brown, and Gostkowski) actually steadily add value as the distance increases (although Akers does seem to suffer a drop around the mid 40 yard distance before picking back up). That being said, we can see that even kickers that are seemingly rated the best may not be actually adding significant value towards the scoreline, given that the mean performance of any of these kickers does not actually exceed 0.25, something that is reflected to an extent in the comparatively small contracts most kickers receive within a roster.
